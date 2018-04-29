@@ -1,68 +1,3 @@
-struct Exception: Error {
-  let description: String
-}
-
-let indent = "  "
-
-protocol Lines {
-  var lines: [String] { get }
-}
-
-extension CustomStringConvertible where Self: Lines {
-  var description: String { return lines.joined(separator: "\n") }
-}
-
-extension Array: Lines where Element: Lines {
-  var lines: [String] {
-    return map { $0.lines.map { indent + $0 } }.joined(separator: [","]).map { $0 }
-  }
-}
-
-extension Subject: Lines, CustomStringConvertible {
-  var lines: [String] {
-    switch self {
-    case .value(let value):
-      return value.atom.lines
-    case .variable(let variable):
-      return ["Variable: \(variable.name)"]
-    }
-  }
-}
-
-extension Atom: Lines, CustomStringConvertible {
-  var lines: [String] {
-    if subjects.count == 0 {
-      return ["Atom: \(predicate)"]
-    }
-    return ["Atom: \(predicate)("] + subjects.lines.map { indent + $0 } + [")"]
-  }
-}
-
-extension Body: Lines, CustomStringConvertible {
-  var lines: [String] {
-    return ["Body"] + terms.flatMap { $0.lines }.map { indent + $0 }
-  }
-}
-
-extension Sentence: Lines, CustomStringConvertible {
-  var lines: [String] {
-    return ["Sentence"] + ["head: \(head)", "body: \(String(describing: body))"].map { indent + $0 }
-  }
-}
-
-extension KnowledgeBase: Lines, CustomStringConvertible {
-  var lines: [String] {
-    return ["Program"] + sentences.flatMap { $0.lines }.map { indent + $0 }
-  }
-}
-
-extension Query: Lines, CustomStringConvertible {
-  var lines: [String] {
-    return ["Query"] + terms.flatMap { $0.lines }.map { indent + $0 }
-  }
-}
-
-
 let kb = """
 happy(sam).
 fun(ai).
@@ -82,12 +17,30 @@ func selectGoal(fromGoals goals: Set<Atom>) -> Atom? {
 }
 
 func unify(_ atom: Atom, with goal: Atom) -> (atomToGoal: [Variable: Subject], goalToAtom: [Variable: Value])? {
+  guard atom.predicate == goal.predicate else {
+    return nil
+  }
   var atomToGoal: [Variable: Subject] = [:]
   var goalToAtom: [Variable: Value] = [:]
   for (atomSubject, goalSubject) in zip(atom.subjects, goal.subjects) {
     if case let .value(atomSubjectValue) = atomSubject, case let .value(goalSubjectValue) = goalSubject {
-      guard atomSubjectValue.atom == goalSubjectValue.atom else {
-        return nil
+      guard
+        let subunification = unify(atomSubjectValue.atom, with: goalSubjectValue.atom),
+        let _ = try? atomToGoal.merge(subunification.atomToGoal, uniquingKeysWith: {
+          s1, s2 in
+          guard s1 == s2 else {
+            throw Exception(description: "")
+          }
+          return s1
+        }),
+        let _ = try? goalToAtom.merge(subunification.goalToAtom, uniquingKeysWith: {
+          v1, v2 in
+          guard v1 == v2 else {
+            throw Exception(description: "")
+          }
+          return v1
+        }) else {
+          return nil
       }
     } else if case let .variable(atomSubjectVariable) = atomSubject {
       atomToGoal[atomSubjectVariable] = goalSubject
@@ -115,7 +68,6 @@ func uniqueVariable(from: Set<Variable>) -> Variable {
 }
 
 func search(kb: KnowledgeBase, goals: Set<Atom>, names: Set<Variable>) -> Substitution? {
-//  print(goals)
   if goals.isEmpty {
     return [:]
   }
@@ -125,9 +77,9 @@ func search(kb: KnowledgeBase, goals: Set<Atom>, names: Set<Variable>) -> Substi
   }
   let goals = goals.subtracting([goal])
 
-  for sentence in kb.sentences.filter({ $0.head == goal }) {
+  for sentence in kb.sentences {
     guard let (atomToGoal, goalToAtom) = unify(sentence.head, with: goal) else {
-      return nil
+      continue
     }
     let terms = sentence.body.terms.map { atom in
       Atom(predicate: atom.predicate, subjects: atom.subjects.map {
@@ -150,9 +102,6 @@ func search(kb: KnowledgeBase, goals: Set<Atom>, names: Set<Variable>) -> Substi
           return $0
         })
     })
-//    print(body)
-//    print(body.terms)
-//    print("KK\(goals.union(body.terms))")
     let goals = Set(goals.map { atom in
       Atom(predicate: atom.predicate, subjects: atom.subjects.map {
         if case let .variable(subjectVariable) = $0, let value = goalToAtom[subjectVariable] {

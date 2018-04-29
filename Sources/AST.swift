@@ -1,4 +1,4 @@
-enum Subject: Parseable {
+enum Subject: Parseable, Hashable {
   case variable(Variable)
   case value(Value)
 
@@ -18,29 +18,23 @@ enum Subject: Parseable {
 }
 
 struct Variable: Hashable { let name: String }
-struct Value { let atom: Atom }
+struct Value: Hashable { let atom: Atom }
 
 typealias Substitution = [Variable: Value]
 
+extension Array: Hashable where Element: Hashable {
+  public var hashValue: Int {
+    return reduce(0, { $0 ^ $1.hashValue })
+  }
+}
+
 struct Atom: Parseable, Hashable {
-  var hashValue: Int {
-    return predicate.hashValue
-  }
-
-  static func == (lhs: Atom, rhs: Atom) -> Bool {
-    let predicate_eq = lhs.predicate == rhs.predicate
-    let subjects_eq = !zip(lhs.subjects, rhs.subjects).map { (arg0) -> Bool in
-      let (lhs_subject, rhs_subject) = arg0
-      guard case let .value(lhs_value) = lhs_subject, case let .value(rhs_value) = rhs_subject else {
-        return true
-      }
-      return lhs_value.atom == rhs_value.atom
-    }.contains(false)
-    return predicate_eq && subjects_eq
-  }
-
   let predicate: String
   let subjects: [Subject]
+
+  func unifiable(_ other: Atom) -> Bool {
+    return true
+  }
 
   static func yes(subjects: [Subject]) -> Atom {
     return Atom(predicate: "yes", subjects: subjects)
@@ -69,8 +63,8 @@ struct Atom: Parseable, Hashable {
 
 struct Arrow: Parseable {
   static func parse<T: Collection>(tokens: T, failure: @escaping ([Exception]) -> Void, success: @escaping (Arrow, T.SubSequence) -> Void) where T.Element == Token, T.Index == Int {
-    Punctuation.less_than.parse(tokens: tokens, failure: { failure($0.appending(Exception(description: "Arrow"))) }) { tokens in
-      Punctuation.hyphen.parse(tokens: tokens, failure: { failure($0.appending(Exception(description: "Arrow"))) }) { tokens in
+    Punctuation.less_than.parse(tokens: tokens, failure: { failure($0 + [Exception(description: "Arrow")]) }) { tokens in
+      Punctuation.hyphen.parse(tokens: tokens, failure: { failure($0 + [Exception(description: "Arrow")]) }) { tokens in
         success(Arrow(), tokens)
       }
     }
@@ -81,7 +75,7 @@ struct Body: Parseable {
   let terms: [Atom]
 
   static func parse<T: Collection>(tokens: T, failure: @escaping ([Exception]) -> Void, success: @escaping (Body, T.SubSequence) -> Void) where T.Element == Token, T.Index == Int {
-    Group.parse(tokens: tokens, separator: .comma, failure: { failure($0.appending(Exception(description: "Body"))) }) { terms, tokens in
+    Group.parse(tokens: tokens, separator: .comma, failure: { failure($0 + [Exception(description: "Body")]) }) { terms, tokens in
       success(Body(terms: terms), tokens)
     }
   }
@@ -102,13 +96,13 @@ struct Sentence: Parseable {
   let body: Body
 
   static func parse<T: Collection>(tokens: T, failure: @escaping ([Exception]) -> Void, success: @escaping (Sentence, T.SubSequence) -> Void) where T.Element == Token, T.Index == Int {
-    Atom.parse(tokens: tokens, failure: { failure($0.appending(Exception(description: "Sentence"))) }) { head, tokens in
+    Atom.parse(tokens: tokens, failure: { failure($0 + [Exception(description: "Sentence")]) }) { head, tokens in
       Arrow.parse(tokens: tokens, failure: { _ in
-        Punctuation.period.parse(tokens: tokens, failure: { failure($0.appending(Exception(description: "Sentence"))) }) { tokens in
+        Punctuation.period.parse(tokens: tokens, failure: { failure($0 + [Exception(description: "Sentence")]) }) { tokens in
           success(Sentence(head: head, body: Body(terms: [])), tokens)
         }
       }) { _, tokens in
-        Body.parse(tokens: tokens, failure: { failure($0.appending(Exception(description: "Sentence"))) }) { body, tokens in
+        Body.parse(tokens: tokens, failure: { failure($0 + [Exception(description: "Sentence")]) }) { body, tokens in
           Punctuation.period.parse(tokens: tokens, failure: failure) { tokens in
             success(Sentence(head: head, body: body), tokens)
           }
@@ -122,7 +116,7 @@ struct KnowledgeBase: Parseable {
   let sentences: [Sentence]
 
   static func parse<T: Collection>(tokens: T, failure: @escaping ([Exception]) -> Void, success: @escaping (KnowledgeBase, T.SubSequence) -> Void) where T.Element == Token, T.Index == Int {
-    Group.parse(tokens: tokens, useAllTokens: true, failure: { failure($0.appending(Exception(description: "Program"))) }) { sentences, tokens in
+    Group.parse(tokens: tokens, useAllTokens: true, failure: { failure($0 + [Exception(description: "Program")]) }) { sentences, tokens in
       success(KnowledgeBase(sentences: sentences), tokens)
     }
   }
@@ -154,21 +148,13 @@ struct Query: Parseable {
   let terms: [Atom]
 
   static func parse<T: Collection>(tokens: T, failure: @escaping ([Exception]) -> Void, success: @escaping (Query, T.SubSequence) -> Void) where T.Element == Token, T.Index == Int {
-    "ask".parse(tokens: tokens, failure: { failure($0.appending(Exception(description: "Query"))) }) { tokens in
-      Body.parse(tokens: tokens, failure: { failure($0.appending(Exception(description: "Query"))) }) { body, tokens in
-        Punctuation.question.parse(tokens: tokens, failure: { failure($0.appending(Exception(description: "Query"))) }) { tokens in
+    "ask".parse(tokens: tokens, failure: { failure($0 + [Exception(description: "Query")]) }) { tokens in
+      Body.parse(tokens: tokens, failure: { failure($0 + [Exception(description: "Query")]) }) { body, tokens in
+        Punctuation.question.parse(tokens: tokens, failure: { failure($0 + [Exception(description: "Query")]) }) { tokens in
           success(Query(terms: body.terms), tokens)
         }
       }
     }
-  }
-}
-
-extension Array {
-  func appending(_ element: Element) -> Array {
-    var this = self
-    this.append(element)
-    return this
   }
 }
 
@@ -182,7 +168,7 @@ struct Group {
       }
       return
     }
-    E.parse(tokens: tokens, failure: { failure($0.appending(Exception(description: "Group"))) }) { e, tokens in
+    E.parse(tokens: tokens, failure: { failure($0 + [Exception(description: "Group")]) }) { e, tokens in
       if let separator = separator {
         separator.parse(tokens: tokens, failure: useAllTokens ? failure : { _ in
           success([e], tokens)
