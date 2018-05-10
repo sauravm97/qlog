@@ -1,5 +1,91 @@
+//typealias Daughter = Female
+//typealias Mother = Female
+//typealias Father = Male
+//typealias Husband = Male
+//
+//typealias Unification = (toWife: [Variable: Subject], toHusband: [Variable: Value])
+//
+//enum Status {
+//  case unknown
+//  case failed
+//  case forcedFailure
+//  case resolved
+//}
+//
+//struct Female: Goal {
+//  var status: Status = .unknown
+//
+//  let atom: Atom
+//  let father: Father?
+//  var husbands: [Father]
+//  var currentHusband: Int
+//
+//  init(atom: Atom, father: Father? = nil, husbands: [Husband]) {
+//    self.atom = atom
+//    self.father = father
+//    self.husbands = husbands
+//    self.currentHusband = 0
+//  }
+//
+//  mutating func redo() {
+//    guard currentHusband > 0 else {
+//      return
+//    }
+//    status = .unknown
+//    let previousHusband = currentHusband - 1
+//    husbands[previousHusband].redo()
+//  }
+//}
+//
+//struct Male: Goal {
+//  var status: Status = .unknown
+//
+//  let sentence: Sentence
+//  let unificationWithWife: Unification
+//  var daughters: [Daughter]?
+//  var currentDaughter: Int
+//
+//  init(sentence: Sentence, unificationWithWife: Unification) {
+//    self.sentence = sentence
+//    self.unificationWithWife = unificationWithWife
+//
+//    self.daughters = nil
+//    self.currentDaughter = 0
+//  }
+//
+//  mutating func createDaughters(withKB kb: KnowledgeBase) {
+//    daughters = sentence.body.terms.map { atom in
+//      let husbands: [Husband] = kb.sentences.compactMap { sentence in
+//        guard let unification = unify(sentence.head, with: atom) else {
+//          return nil
+//        }
+//        return Husband(sentence: sentence, unificationWithWife: unification)
+//      }
+//      return Daughter(atom: atom, father: self, husbands: husbands)
+//    }
+//  }
+//
+//  mutating func redo() {
+//    status = .unknown
+//    let previousDaughter = currentDaughter - 1
+//    daughters?[previousDaughter].redo()
+//  }
+//}
+//
+//protocol Goal {
+//  var status: Status { get }
+//  mutating func redo()
+//  func call()
+//  func exit()
+//  func fail()
+//}
+
 func selectGoal(fromGoals goals: Set<Atom>) -> Atom? {
   return goals.first
+}
+
+func isGoalNode(state: Sentence) -> Bool {
+  return state.head.predicate == "yes" && state.body.terms.isEmpty
 }
 
 func unify(_ atom: Atom, with goal: Atom) -> (atomToGoal: [Variable: Subject], goalToAtom: [Variable: Value])? {
@@ -47,13 +133,13 @@ func variables<T: Sequence>(_ atoms: T) -> Set<Variable> where T.Element == Atom
 }
 
 var counter = 0
-func uniqueVariable(from: Set<Variable>) -> Variable {
+func uniqueVariable() -> Variable {
   let name = "temp\(counter)"
   counter += 1
   return Variable(name: name)
 }
 
-func search(kb: KnowledgeBase, goals: Set<Atom>, names: Set<Variable>) -> Substitution? {
+func search(kb: KnowledgeBase, goals: Set<Atom>) -> Substitution? {
   if goals.isEmpty {
     return [:]
   }
@@ -67,6 +153,9 @@ func search(kb: KnowledgeBase, goals: Set<Atom>, names: Set<Variable>) -> Substi
     guard let (atomToGoal, goalToAtom) = unify(sentence.head, with: goal) else {
       continue
     }
+    let goalVariables = variables(goals)
+    let nameClashes = variables(sentence.body.terms).subtracting(variables([sentence.head])).intersection(goalVariables)
+    let renamings = Dictionary(uniqueKeysWithValues: nameClashes.map { ($0, uniqueVariable()) })
     let terms = sentence.body.terms.map { atom in
       Atom(predicate: atom.predicate, subjects: atom.subjects.map {
         if case let .variable(subjectVariable) = $0, let subject = atomToGoal[subjectVariable] {
@@ -75,11 +164,6 @@ func search(kb: KnowledgeBase, goals: Set<Atom>, names: Set<Variable>) -> Substi
         return $0
       })
     }
-    let goalVariables = variables(goals)
-    let nameClashes = variables(terms).intersection(goalVariables)
-    let renamings = nameClashes.reduce([:], {
-      $0.merging([$1: uniqueVariable(from: names.union(goalVariables.union($0.keys)))], uniquingKeysWith: { $1 })
-    })
     let body = Body(terms: terms.map { atom in
       Atom(predicate: atom.predicate, subjects: atom.subjects.map {
         if case let .variable(subjectVariable) = $0, let variable = renamings[subjectVariable] {
@@ -95,9 +179,10 @@ func search(kb: KnowledgeBase, goals: Set<Atom>, names: Set<Variable>) -> Substi
         }
         return $0
       })
-    })
-    if let substitution = search(kb: kb, goals: goals.union(body.terms), names: names.union(goalToAtom.keys)) {
-      return goalToAtom.merging(substitution, uniquingKeysWith: { $1 })
+    }).union(body.terms)
+    if let substitution = search(kb: kb, goals: goals) {
+      let goalVariables = variables(goals)
+      return goalToAtom.merging(substitution.filter { goalVariables.contains($0.key) }, uniquingKeysWith: { _,_ in fatalError() })
     }
   }
   return nil

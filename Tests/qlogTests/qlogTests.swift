@@ -2,27 +2,32 @@ import XCTest
 @testable import qlog
 
 final class qlogTests: XCTestCase {
-  func testBasic() {
-    let kb = """
-        happy(sam).
-        fun(ai).
-        live_underground(worms).
-        night_time.
-        eats(bird, apple).
-        eaten(X) <- eats(Y, X).
-        switch(up) <- in_room(sam), night_time.
-      """
+  func test_yes(kb: String, query: String, solutions: [Substitution]) {
+    solve(kb: kb, query: query, failure: { exceptions in
+      print("ERROR:")
+      for exception in exceptions {
+        print(exception.description)
+      }
+      XCTAssert(false)
+    }) { result in
+      switch result {
+      case .yes(let (_, substitution)):
+        var success = false
+        for solution in solutions {
+          if substitution == solution {
+            success = true
+            break
 
-    let query = """
-        ask eaten(X), fun(Y), eaten(Z) ?
-      """
+          }
+        }
+        XCTAssert(success)
+      case .no:
+        XCTAssert(false)
+      }
+    }
+  }
 
-    let solution = [
-      Variable(name: "X"): Value(atom: Atom(predicate: "apple", subjects: [])),
-      Variable(name: "Y"): Value(atom: Atom(predicate: "ai", subjects: [])),
-      Variable(name: "Z"): Value(atom: Atom(predicate: "apple", subjects: [])),
-      ]
-
+  func test_yes(kb: String, query: String, solution: Substitution) {
     solve(kb: kb, query: query, failure: { exceptions in
       print("ERROR:")
       for exception in exceptions {
@@ -37,6 +42,44 @@ final class qlogTests: XCTestCase {
         XCTAssert(false)
       }
     }
+  }
+
+  func test_no(kb: String, query: String) {
+    solve(kb: kb, query: query, failure: { exceptions in
+      print("ERROR:")
+      for exception in exceptions {
+        print(exception.description)
+      }
+      XCTAssert(false)
+    }) { result in
+      switch result {
+      case .yes:
+        XCTAssert(false)
+      case .no:
+        XCTAssert(true)
+      }
+    }
+  }
+
+  func testBasic() {
+    let kb = """
+        happy(sam).
+        fun(ai).
+        live_underground(worms).
+        night_time.
+        eats(bird, apple).
+        eaten(X) <- eats(Y, X).
+        switch(up) <- in_room(sam), night_time.
+      """
+
+    test_yes(
+      kb: kb,
+      query: "ask eaten(X), fun(Y), eaten(Z)?",
+      solution: [
+        Variable(name: "X"): Value(atom: Atom(predicate: "apple", subjects: [])),
+        Variable(name: "Y"): Value(atom: Atom(predicate: "ai", subjects: [])),
+        Variable(name: "Z"): Value(atom: Atom(predicate: "apple", subjects: []))
+      ])
   }
 
   func testAdvanced() {
@@ -66,29 +109,62 @@ final class qlogTests: XCTestCase {
       west(W,E) <- imm_west(W,M), west(M,E).
       """
 
-    let query = """
-      ask two_doors_east(R,r107)?
-    """
+    test_yes(
+      kb: kb,
+      query: "ask two_doors_east(R,r107)?",
+      solution: [
+        Variable(name: "R"): Value(atom: Atom(predicate: "r111", subjects: []))
+      ])
 
-    let solution = [
-      Variable(name: "R"): Value(atom: Atom(predicate: "r111", subjects: [])),
-      ]
+    test_yes(
+      kb: kb,
+      query: "ask imm_west(r105,r107)?",
+      solution: [:])
 
-    solve(kb: kb, query: query, failure: { exceptions in
-      print("ERROR:")
-      for exception in exceptions {
-        print(exception.description)
-      }
-      XCTAssert(false)
-    }) { result in
-      switch result {
-      case .yes(let (_, substitution)):
-        print(substitution)
-        XCTAssert(substitution == solution)
-      case .no:
-        XCTAssert(false)
-      }
-    }
+    test_yes(
+      kb: kb,
+      query: "ask imm_east(r107,r105)?",
+      solution: [:])
+
+    test_no(
+      kb: kb,
+      query: "ask imm_west(r205,r207)?")
+
+    test_yes(
+      kb: kb,
+      query: "ask next_door(R,r105)?",
+      solutions: [
+        [
+          Variable(name: "R"): Value(atom: Atom(predicate: "r107", subjects: []))
+        ],
+        [
+          Variable(name: "R"): Value(atom: Atom(predicate: "r103", subjects: []))
+        ]])
+
+    test_yes(
+      kb: kb,
+      query: "ask west(R,r105)?",
+      solutions: [
+        [
+          Variable(name: "R"): Value(atom: Atom(predicate: "r101", subjects: []))
+        ],
+        [
+          Variable(name: "R"): Value(atom: Atom(predicate: "r103", subjects: []))
+        ]])
+
+    test_yes(
+      kb: kb,
+      query: "ask west(r105,R)?",
+      solutions: [
+        [
+          Variable(name: "R"): Value(atom: Atom(predicate: "r107", subjects: []))
+        ],
+        [
+          Variable(name: "R"): Value(atom: Atom(predicate: "r111", subjects: []))
+        ],
+        [
+          Variable(name: "R"): Value(atom: Atom(predicate: "r109", subjects: []))
+        ]])
   }
 
   static var allTests = [
